@@ -17,8 +17,8 @@ significance_alpha = 0.10; % Significance level (e.g., 0.10 for 90% confidence)
 
 %% Select files to process
 fprintf('\nSelect processed files to analyze...\n');
-[filenames, folderpath] = uigetfile('*_mcor.mat', ...
-                                     'Select _mcor.mat files to analyze', ...
+[filenames, folderpath] = uigetfile('*.mat', ...
+                                     'Select .mat files containing refined ROIs to analyze', ...
                                      'MultiSelect', 'on');
 if isequal(filenames, 0)
     error('No files selected. Exiting.');
@@ -42,21 +42,19 @@ for fi = 1:numel(filelist)
     lf = load(fil, 'ROI_center_refined', 'F_raw_refined', ...
               'F_inferred_refined', 'Z_mod_refined');
     
-    % Try to load parameters used for Z_mod_refined calculation
     params = struct();
     try
-        lf_params = load(fil, 'params');
-        params = lf_params.params;
+        lf_params = load(fil, 'options');
+        params = lf_params.options;
         fprintf('  Loaded existing parameters from file.\n');
     catch
         fprintf('  No parameters found in file. Using defaults.\n');
     end
     
-    % Add Nsamples to parameters
     params.Nsamples = Nsamples;
     
     [n_rois, n_frames] = size(lf.Z_mod_refined);
-    total_time = n_frames * frame_rate; % Total recording time in seconds
+    total_time = n_frames * frame_rate;
     
     fprintf('  Number of ROIs: %d\n', n_rois);
     fprintf('  Number of frames: %d\n', n_frames);
@@ -70,43 +68,33 @@ for fi = 1:numel(filelist)
     %% Process each ROI
     fprintf('  Analyzing ROI spike statistics...\n');
     for i = 1:n_rois
-        % Generate N spike trains for this ROI
         sinfo = cont_ca_sampler(lf.Z_mod_refined(i, :), params);
         ntrials = size(sinfo.ss, 1);
         
-        % Collect all spike times across trials
-        all_isi = [];  % Inter-spike intervals
+        all_isi = [];
         total_spikes = 0;
-        
-        % Calculate spike probability (histogram across bins)
         spike_counts = zeros(1, n_frames);
         
         for trial = 1:ntrials
             spike_times = sinfo.ss{trial};
-            
-            % Count spikes in each frame bin
             spike_counts = spike_counts + histcounts(spike_times, 0:n_frames);
             
-            % Calculate inter-spike intervals for this trial
             if numel(spike_times) > 1
-                isi = diff(spike_times) * frame_rate; % Convert to seconds
+                isi = diff(spike_times) * frame_rate;
                 all_isi = [all_isi; isi(:)];
             end
             
             total_spikes = total_spikes + numel(spike_times);
         end
         
-        % Calculate burstiness (coefficient of variation of ISI)
+        % Burstiness: CV of inter-spike intervals
         if ~isempty(all_isi) && std(all_isi) > 0
             burstiness(i) = std(all_isi) / mean(all_isi);
         else
             burstiness(i) = 0;
         end
         
-        % Calculate firing rate in Hz
         firing_rate_hz(i) = total_spikes / (ntrials * total_time);
-        
-        % Calculate spike probability (average across trials)
         P_spike(i, :) = spike_counts / ntrials;
     end
     
@@ -116,89 +104,74 @@ for fi = 1:numel(filelist)
     %% Calculate functional connectivity using cross-correlation
     fprintf('  Computing functional connectivity matrix...\n');
     
-    % Initialize matrices
-    R = zeros(n_rois, n_rois);              % Cross-correlation values
-    R_pvalue = ones(n_rois, n_rois);        % P-values for significance
-    R_significant = false(n_rois, n_rois); % Boolean mask for significant connections
+    R = zeros(n_rois, n_rois);
+    R_pvalue = ones(n_rois, n_rois);
+    R_significant = false(n_rois, n_rois);
     
-    % Compute null distribution using spike train shuffling
     fprintf('  Computing significance thresholds via spike train shuffling (%d shuffles)...\n', n_shuffles);
     
     for i = 1:n_rois
-        for j = i:n_rois  % Only compute upper triangle (symmetric)
+        for j = i:n_rois
             if i == j
-                R(i, j) = 1.0;  % Perfect autocorrelation
+                R(i, j) = 1.0;
                 R_pvalue(i, j) = 0;
                 R_significant(i, j) = true;
             else
-                % Compute actual cross-correlation
-                [xcorr_vals, lags] = xcorr(P_spike(i, :), P_spike(j, :), max_lag, 'coeff');
+                [xcorr_vals, ~] = xcorr(P_spike(i, :), P_spike(j, :), max_lag, 'coeff');
                 
-                % Store signed maximum correlation value (keep sign for excitatory/inhibitory)
+                % Store signed max correlation (preserves excitatory/inhibitory)
                 [~, max_idx] = max(abs(xcorr_vals));
                 actual_corr = xcorr_vals(max_idx);
                 R(i, j) = actual_corr;
-                R(j, i) = actual_corr;  % Symmetric
+                R(j, i) = actual_corr;
                 
-                % Generate null distribution by shuffling one spike train
+                % Null distribution via circular shift shuffling
                 null_corr = zeros(n_shuffles, 1);
                 for shuffle = 1:n_shuffles
-                    % Randomly circularly shift one spike train to destroy temporal relationship
                     random_shift = randi([1, n_frames - 1]);
                     P_shuffled = circshift(P_spike(j, :), random_shift);
                     
-                    % Compute cross-correlation on shuffled data
                     xcorr_jitter = xcorr(P_spike(i, :), P_shuffled, max_lag, 'coeff');
                     [~, max_idx_jitter] = max(abs(xcorr_jitter));
                     null_corr(shuffle) = xcorr_jitter(max_idx_jitter);
                 end
                 
-                % Calculate p-value (two-tailed test)
+                % Two-tailed test
                 p_val = sum(abs(null_corr) >= abs(actual_corr)) / n_shuffles;
                 R_pvalue(i, j) = p_val;
-                R_pvalue(j, i) = p_val;  % Symmetric
+                R_pvalue(j, i) = p_val;
                 
-                % Determine significance
                 is_significant = p_val < significance_alpha;
                 R_significant(i, j) = is_significant;
-                R_significant(j, i) = is_significant;  % Symmetric
+                R_significant(j, i) = is_significant;
             end
         end
     end
     
     %% Calculate synchronization metrics
-    % Count significant connections
-    upper_triangle_indices = triu(true(n_rois), 1);  % Exclude diagonal
+    upper_triangle_indices = triu(true(n_rois), 1);
     unique_correlations = R(upper_triangle_indices);
     n_significant = sum(R_significant(upper_triangle_indices));
     percent_significant = 100 * n_significant / numel(unique_correlations);
     
-    % Global population synchrony (multivariate measure)
-    % Uses ALL neurons - measures population-level coordination regardless of pairwise significance
+    % Global population synchrony (z-score normalized, all neurons)
     fprintf('  Computing global population synchrony...\n');
-    % Normalize each neuron (z-score) so all neurons contribute equally
-    P_spike_norm = zscore(P_spike, 0, 2);  % Normalize each row (neuron) across time
-    % At each time point, measure standard deviation across normalized neurons
-    global_synchrony_timeseries = 1 ./ (std(P_spike_norm, 0, 1) + eps);  % Inverse std at each time
-    % Summary index: average synchrony across time
+    P_spike_norm = zscore(P_spike, 0, 2);
+    global_synchrony_timeseries = 1 ./ (std(P_spike_norm, 0, 1) + eps);
     global_synchrony_index = mean(global_synchrony_timeseries);
     
-    % Spectral coherence (frequency-domain synchronization)
-    % Computes for ALL pairs - can filter by R_significant later for analysis
+    % Spectral coherence (frequency-domain, all pairs)
     fprintf('  Computing spectral coherence...\n');
     coherence_matrix = zeros(n_rois, n_rois);
     for i = 1:n_rois
-        coherence_matrix(i, i) = 1.0;  % Perfect coherence with self
+        coherence_matrix(i, i) = 1.0;
         for j = i+1:n_rois
-            % Magnitude-squared coherence
             [Cxy, ~] = mscohere(P_spike(i, :), P_spike(j, :), [], [], [], 1/frame_rate);
-            % Average coherence across frequencies
             avg_coherence = mean(Cxy);
             coherence_matrix(i, j) = avg_coherence;
-            coherence_matrix(j, i) = avg_coherence;  % Symmetric
+            coherence_matrix(j, i) = avg_coherence;
         end
     end
-    % Average coherence across all unique pairs
     spectral_coherence_index = mean(coherence_matrix(upper_triangle_indices));
     
     fprintf('  Global synchrony index: %.4f\n', global_synchrony_index);
@@ -211,10 +184,8 @@ for fi = 1:numel(filelist)
     %% Save results
     fprintf('  Saving results...\n');
     
-    % Load all original variables first
     original_data = load(fil);
     
-    % Add new calculated variables
     original_data.burstiness = burstiness;
     original_data.firing_rate_hz = firing_rate_hz;
     original_data.P_spike = P_spike;
@@ -239,7 +210,6 @@ for fi = 1:numel(filelist)
         'percent_significant_connections', percent_significant, ...
         'analysis_date', datetime('now'));
     
-    % Save back to the same file (overwrite)
     save(fil, '-struct', 'original_data');
     
     fprintf('  File updated successfully.\n\n');
@@ -250,16 +220,3 @@ fprintf('========================================\n');
 fprintf('Analysis complete!\n');
 fprintf('Processed %d files.\n', numel(filelist));
 fprintf('========================================\n');
-fprintf('\nAdded variables to each file:\n');
-fprintf('  - burstiness: Coefficient of variation of ISI for each ROI\n');
-fprintf('  - firing_rate_hz: Firing rate in Hz for each ROI\n');
-fprintf('  - P_spike: Spike probability matrix (ROIs x frames)\n');
-fprintf('  - R: Functional connectivity matrix (ROIs x ROIs, signed cross-correlation)\n');
-fprintf('  - R_pvalue: P-values for each connection (via spike train shuffling)\n');
-fprintf('  - R_significant: Boolean mask for significant connections\n');
-fprintf('  - coherence_matrix: Spectral coherence matrix (ROIs x ROIs)\n');
-fprintf('  - global_synchrony_timeseries: Population synchrony at each time point\n');
-fprintf('  - global_synchrony_index: Average global synchrony across time\n');
-fprintf('  - spectral_coherence_index: Average spectral coherence across all pairs\n');
-fprintf('  - params: Parameters used for analysis\n');
-fprintf('  - analysis_metadata: Analysis settings and timestamp\n');
