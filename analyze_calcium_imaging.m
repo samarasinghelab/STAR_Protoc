@@ -8,7 +8,7 @@ clc;
 
 %% User-defined parameters (modify these as needed)
 Nsamples = 1000;         % Number of samples for spike train generation
-frame_rate = 0.3875;     % Frame rate in seconds per frame
+frame_period = 0.3875;     % Frame period in seconds per frame
 max_lag = 13;            % Maximum lag for cross-correlation in frames (~5 seconds at default frame rate)
 
 % Statistical significance parameters
@@ -54,7 +54,7 @@ for fi = 1:numel(filelist)
     params.Nsamples = Nsamples;
     
     [n_rois, n_frames] = size(lf.Z_mod_refined);
-    total_time = n_frames * frame_rate;
+    total_time = n_frames * frame_period;
     
     fprintf('  Number of ROIs: %d\n', n_rois);
     fprintf('  Number of frames: %d\n', n_frames);
@@ -80,7 +80,7 @@ for fi = 1:numel(filelist)
             spike_counts = spike_counts + histcounts(spike_times, 0:n_frames);
             
             if numel(spike_times) > 1
-                isi = diff(spike_times) * frame_rate;
+                isi = diff(spike_times) * frame_period;
                 all_isi = [all_isi; isi(:)];
             end
             
@@ -166,7 +166,7 @@ for fi = 1:numel(filelist)
     for i = 1:n_rois
         coherence_matrix(i, i) = 1.0;
         for j = i+1:n_rois
-            [Cxy, ~] = mscohere(P_spike(i, :), P_spike(j, :), [], [], [], 1/frame_rate);
+            [Cxy, ~] = mscohere(P_spike(i, :), P_spike(j, :), [], [], [], 1/frame_period);
             avg_coherence = mean(Cxy);
             coherence_matrix(i, j) = avg_coherence;
             coherence_matrix(j, i) = avg_coherence;
@@ -198,7 +198,7 @@ for fi = 1:numel(filelist)
     original_data.spectral_coherence_index = spectral_coherence_index;
     original_data.params = params;
     original_data.analysis_metadata = struct(...
-        'frame_rate', frame_rate, ...
+        'frame_period', frame_period, ...
         'max_lag', max_lag, ...
         'Nsamples', Nsamples, ...
         'n_shuffles', n_shuffles, ...
@@ -220,3 +220,4 @@ fprintf('========================================\n');
 fprintf('Analysis complete!\n');
 fprintf('Processed %d files.\n', numel(filelist));
 fprintf('========================================\n');
+
