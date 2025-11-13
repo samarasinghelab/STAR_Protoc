@@ -11,6 +11,9 @@ Nsamples = 1000;         % Number of samples for spike train generation
 frame_period = 0.3875;     % Frame period in seconds per frame
 max_lag = 13;            % Maximum lag for cross-correlation in frames (~5 seconds at default frame rate)
 
+% Temporal smoothing parameters
+smooth_window = 1;       % Moving average window size for P_spike (1 = no smoothing, >1 = apply smoothing)
+
 % Statistical significance parameters
 n_shuffles = 1000;       % Number of shuffles for significance testing
 significance_alpha = 0.10; % Significance level (e.g., 0.10 for 90% confidence)
@@ -100,6 +103,16 @@ for fi = 1:numel(filelist)
     
     fprintf('  Burstiness range: [%.3f, %.3f]\n', min(burstiness), max(burstiness));
     fprintf('  Firing rate range: [%.3f, %.3f] Hz\n', min(firing_rate_hz), max(firing_rate_hz));
+    
+    %% Apply temporal smoothing to P_spike
+    if smooth_window > 1
+        fprintf('  Applying temporal smoothing (window size = %d frames)...\n', smooth_window);
+        P_spike_smoothed = zeros(size(P_spike));
+        for i = 1:n_rois
+            P_spike_smoothed(i, :) = movmean(P_spike(i, :), smooth_window);
+        end
+        P_spike = P_spike_smoothed;
+    end
     
     %% Calculate functional connectivity using cross-correlation
     fprintf('  Computing functional connectivity matrix...\n');
@@ -201,6 +214,7 @@ for fi = 1:numel(filelist)
         'frame_period', frame_period, ...
         'max_lag', max_lag, ...
         'Nsamples', Nsamples, ...
+        'smooth_window', smooth_window, ...
         'n_shuffles', n_shuffles, ...
         'significance_alpha', significance_alpha, ...
         'n_rois', n_rois, ...
@@ -220,4 +234,5 @@ fprintf('========================================\n');
 fprintf('Analysis complete!\n');
 fprintf('Processed %d files.\n', numel(filelist));
 fprintf('========================================\n');
+
 
