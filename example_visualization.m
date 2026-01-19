@@ -8,13 +8,14 @@ clc;
 
 %% Load analyzed data
 fprintf('Loading analyzed data...\n');
-data_file = 'C:\Users\RSama\OneDrive\Desktop\STAR_Protoc_example_mcor.mat';
+fprintf('Please select the analyzed .mat file (e.g., STAR_Protoc_example_mcor.mat)...\n');
+[filename, filepath] = uigetfile('*.mat', 'Select analyzed .mat file (e.g., STAR_Protoc_example_mcor.mat)');
 
-% Check if file exists
-if ~isfile(data_file)
-    error('File not found: %s\nPlease update the path to your analyzed .mat file.', data_file);
+if isequal(filename, 0)
+    error('No file selected. Exiting.');
 end
 
+data_file = fullfile(filepath, filename);
 data = load(data_file);
 fprintf('Data loaded successfully!\n\n');
 
