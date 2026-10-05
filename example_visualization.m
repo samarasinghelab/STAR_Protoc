@@ -199,6 +199,43 @@ for i = 1:n_examples
     end
 end
 
+%% Figure 6: Network Graph (edge thickness = connection strength)
+figure('Name', 'Network Graph', 'Position', [350, 350, 900, 800]);
+
+% Weighted adjacency matrix: significant connections only, no self-loops
+% Raise min_abs_weight (e.g., 0.2) to hide weak edges if the plot is cluttered
+min_abs_weight = 0;
+W = R .* R_significant;
+W(1:n_rois+1:end) = 0;
+W(abs(W) < min_abs_weight) = 0;
+G = graph(W, 'upper');
+
+h = plot(G, 'Layout', 'force', 'NodeColor', [0.2 0.2 0.2], 'EdgeAlpha', 0.6);
+title('Functional Network (significant connections)');
+axis off;
+
+if numedges(G) > 0
+    w = G.Edges.Weight;
+    abs_w = abs(w);
+
+    % Edge thickness scaled to [0.5, 6] by |correlation|
+    min_lw = 0.5;
+    max_lw = 6;
+    h.LineWidth = min_lw + (max_lw - min_lw) * (abs_w - min(abs_w)) / (max(abs_w) - min(abs_w) + eps);
+
+    % Edge color: red = positive correlation, blue = negative correlation
+    edge_colors = repmat([0.85 0.2 0.2], numedges(G), 1);
+    edge_colors(w < 0, :) = repmat([0.2 0.3 0.85], sum(w < 0), 1);
+    h.EdgeColor = edge_colors;
+
+    % Node size scaled by degree
+    h.MarkerSize = 4 + 8 * degree(G) / max(max(degree(G)), 1);
+
+    title(sprintf('Functional Network: %d edges (thickness = |R|, red = +, blue = -)', numedges(G)));
+else
+    title('Functional Network: no significant connections');
+end
+
 %% Print Summary Statistics
 fprintf('========================================\n');
 fprintf('ANALYSIS SUMMARY\n');
